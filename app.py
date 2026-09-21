@@ -209,24 +209,45 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-def load_metadata(url):
+def get_ytdlp_base_cmd(client="ios,android,web"):
+    cookie_flag = ""
     try:
-        cmd_meta = f'yt-dlp --extractor-args "youtube:player_client=android" --print "title,duration" "{url}"'
-        proc = subprocess.Popen(cmd_meta, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        stdout, stderr = proc.communicate()
-        
-        if proc.returncode == 0:
-            meta_output = stdout.decode('utf-8', errors='ignore').strip().split('\n')
-            if len(meta_output) >= 2:
-                st.session_state.video_info = {
-                    'url': url,
-                    'title': meta_output[0],
-                    'duration': int(meta_output[1])
-                }
-                return True, ""
-        return False, stderr.decode('utf-8')
-    except Exception as e:
-        return False, str(e)
+        if "YOUTUBE_COOKIES" in st.secrets and st.secrets["YOUTUBE_COOKIES"]:
+            import tempfile
+            cookie_path = os.path.join(tempfile.gettempdir(), "yt_cookies.txt")
+            with open(cookie_path, "w", encoding="utf-8") as f:
+                f.write(st.secrets["YOUTUBE_COOKIES"])
+            cookie_flag = f'--cookies "{cookie_path}" '
+        elif os.path.exists("cookies.txt"):
+            cookie_flag = '--cookies "cookies.txt" '
+    except Exception:
+        pass
+    return f'yt-dlp {cookie_flag}--extractor-args "youtube:player_client={client}" --user-agent "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1" '
+
+
+def load_metadata(url):
+    clients = ["ios,android,web", "android,web", "web_creator,android", "mweb"]
+    last_err = ""
+    for cl in clients:
+        try:
+            base = get_ytdlp_base_cmd(cl)
+            cmd_meta = f'{base}--print "title,duration" "{url}"'
+            proc = subprocess.Popen(cmd_meta, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            stdout, stderr = proc.communicate()
+            
+            if proc.returncode == 0:
+                meta_output = stdout.decode('utf-8', errors='ignore').strip().split('\n')
+                if len(meta_output) >= 2:
+                    st.session_state.video_info = {
+                        'url': url,
+                        'title': meta_output[0],
+                        'duration': int(meta_output[1])
+                    }
+                    return True, ""
+            last_err = stderr.decode('utf-8', errors='ignore')
+        except Exception as e:
+            last_err = str(e)
+    return False, last_err
 
 
 @st.dialog("✂️ Editor Segmen Crop Dinamis")
@@ -444,7 +465,8 @@ if st.session_state.current_page == 1:
                         
                         st.info("Sedang mengambil 100+ video dari YouTube, ini mungkin memakan waktu 10-20 detik...")
                         for cat_name, (query, num) in categories.items():
-                            cmd_search = f'yt-dlp "ytsearch{num}:{query}" --flat-playlist --print "%(title)s|https://youtube.com/watch?v=%(id)s"'
+                            base_cmd = get_ytdlp_base_cmd("ios,web")
+                            cmd_search = f'{base_cmd}"ytsearch{num}:{query}" --flat-playlist --print "%(title)s|https://youtube.com/watch?v=%(id)s"'
                             proc = subprocess.Popen(cmd_search, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                             stdout, _ = proc.communicate()
                             
@@ -714,10 +736,16 @@ elif st.session_state.current_page == 99:
                         import tempfile
                         tmpdir = tempfile.mkdtemp()
                         audio_path = os.path.join(tmpdir, "audio.m4a")
-                        cmd_audio = f'yt-dlp -f "bestaudio[ext=m4a]" -o "{audio_path}" "{st.session_state.video_url}"'
-                        subprocess.run(cmd_audio, shell=True)
-                        if not os.path.exists(audio_path):
-                            st.error("Gagal mengunduh audio.")
+                        dl_audio_success = False
+                        for cl in ["ios,android,web", "android,web", "web_creator", "mweb"]:
+                            base_cmd = get_ytdlp_base_cmd(cl)
+                            cmd_audio = f'{base_cmd}-f "bestaudio[ext=m4a]/bestaudio/best" -o "{audio_path}" "{st.session_state.video_url}"'
+                            subprocess.run(cmd_audio, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                            if os.path.exists(audio_path) and os.path.getsize(audio_path) > 1000:
+                                dl_audio_success = True
+                                break
+                        if not dl_audio_success:
+                            st.error("Gagal mengunduh audio YouTube (403 Forbidden atau dibatasi). Coba tambahkan YOUTUBE_COOKIES di secrets.")
                             st.stop()
                         content_payload = audio_path
                         content_type = "audio"
@@ -1086,12 +1114,15 @@ elif st.session_state.current_page == 4:
                         st.progress(20)
                     target_raw = os.path.join("downloads", f"raw_{out}")
                     
-                    # Retry 2x jika gagal karena 403
+                    # Retry dengan rotasi client jika terkena 403
                     success_dl = False
-                    for attempt in range(3):
+                    dl_clients = ["ios,android,web", "android,web", "web_creator,android", "mweb"]
+                    last_dl_err = ""
+                    for cl in dl_clients:
+                        base_cmd = get_ytdlp_base_cmd(cl)
                         cmd_ytdlp = (
-                            f'yt-dlp --extractor-args "youtube:player_client=android_vr,default" '
-                            f'-f "bestvideo[vcodec^=avc][height>=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[vcodec^=avc][ext=mp4]+bestaudio[ext=m4a]/best[vcodec^=avc][ext=mp4]/best[ext=mp4]/best" '
+                            f'{base_cmd}'
+                            f'-f "bestvideo[vcodec^=avc][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[vcodec^=avc][ext=mp4]/best[ext=mp4]/best" '
                             f'--merge-output-format mp4 --download-sections "*{s}-{e}" '
                             f'--force-overwrites -o "{target_raw}" "{info["url"]}"'
                         )
@@ -1099,10 +1130,11 @@ elif st.session_state.current_page == 4:
                         if os.path.exists(target_raw) and os.path.getsize(target_raw) > 1000:
                             success_dl = True
                             break
-                        import time; time.sleep(2)  # Jeda sebelum retry
+                        last_dl_err = proc_dl.stderr.decode('utf-8', errors='ignore')
+                        time.sleep(1)
                     
                     download_results.append((idx, out, target_raw, config_tuple, success_dl,
-                                             proc_dl.stderr.decode('utf-8', errors='ignore') if not success_dl else ""))
+                                             last_dl_err if not success_dl else ""))
 
                 # ── FASE 2: RENDER FFmpeg PARALEL (CPU-bound, aman diparalelkan) ──
                 def render_clip(dl_result):
