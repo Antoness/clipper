@@ -1,0 +1,7 @@
+streamlit
+yt-dlp
+youtube-transcript-api
+google-generativeai
+ultralytics
+opencv-python
+mediapipe

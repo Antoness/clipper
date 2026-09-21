@@ -1,0 +1,37 @@
+# Virtual Environments
+venv/
+venv.nosync/
+venv2/
+.env
+*.env
+
+# Secrets & Configs
+.streamlit/secrets.toml
+
+# Python Cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# MacOS
+.DS_Store
+
+# Logs
+*.log
+streamlit.log
+
+# Test & Local Scripts
+test_*.py
+test_*.sh
+test_*.log
+patch_app.py
+run.sh
+url.txt
+
+# Local Media & Dump
+*.mp4
+*.jpg
+*.ass
+dump.json
+downloads/*
+!downloads/.gitkeep
