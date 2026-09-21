@@ -209,20 +209,20 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-def get_ytdlp_base_cmd(client="ios,android,web"):
+def get_ytdlp_base_cmd(client="tv_embedded,ios,android,web"):
     cookie_flag = ""
     try:
         if "YOUTUBE_COOKIES" in st.secrets and st.secrets["YOUTUBE_COOKIES"]:
             import tempfile
             cookie_path = os.path.join(tempfile.gettempdir(), "yt_cookies.txt")
             with open(cookie_path, "w", encoding="utf-8") as f:
-                f.write(st.secrets["YOUTUBE_COOKIES"])
+                f.write(st.secrets["YOUTUBE_COOKIES"].strip())
             cookie_flag = f'--cookies "{cookie_path}" '
         elif os.path.exists("cookies.txt"):
             cookie_flag = '--cookies "cookies.txt" '
     except Exception:
         pass
-    return f'yt-dlp {cookie_flag}--extractor-args "youtube:player_client={client}" --user-agent "Mozilla/5.0 (iPhone; CPU iPhone OS 16_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1" '
+    return f'yt-dlp {cookie_flag}--js-runtimes nodejs --extractor-args "youtube:player_client={client}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" '
 
 
 def load_metadata(url):
@@ -1116,13 +1116,13 @@ elif st.session_state.current_page == 4:
                     
                     # Retry dengan rotasi client jika terkena 403
                     success_dl = False
-                    dl_clients = ["ios,android,web", "android,web", "web_creator,android", "mweb"]
+                    dl_clients = ["tv_embedded,web_embedded", "ios,mweb", "android,web", "web"]
                     last_dl_err = ""
                     for cl in dl_clients:
                         base_cmd = get_ytdlp_base_cmd(cl)
                         cmd_ytdlp = (
                             f'{base_cmd}'
-                            f'-f "bestvideo[vcodec^=avc][ext=mp4]+bestaudio[ext=m4a]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[vcodec^=avc][ext=mp4]/best[ext=mp4]/best" '
+                            f'-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best" '
                             f'--merge-output-format mp4 --download-sections "*{s}-{e}" '
                             f'--force-overwrites -o "{target_raw}" "{info["url"]}"'
                         )
