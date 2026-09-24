@@ -5,6 +5,8 @@ import datetime
 import json
 import re
 from youtube_transcript_api import YouTubeTranscriptApi
+import warnings
+warnings.filterwarnings('ignore', message='.*google.generativeai.*')
 import google.generativeai as genai
 import urllib.parse
 import time
@@ -209,35 +211,30 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-def _ensure_yt_dlp_deps():
-    """Auto-install deno dan yt-dlp-ejs untuk memecahkan YouTube n-challenge (SABR experiment)."""
-    if getattr(_ensure_yt_dlp_deps, '_done', False):
+def _ensure_yt_dlp_ready():
+    """Pastikan yt-dlp siap: upgrade ke terbaru & hapus plugin yt-dlp-ejs yang merusak."""
+    if getattr(_ensure_yt_dlp_ready, '_done', False):
         return
+    import sys
     try:
-        # Install yt-dlp-ejs plugin jika belum ada
-        import importlib
-        try:
-            importlib.import_module('yt_dlp_plugins.extractor.ejs')
-        except (ImportError, ModuleNotFoundError):
-            subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', 'yt-dlp-ejs'],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
-        # Cek deno tersedia (dibutuhkan yt-dlp-ejs untuk solve JS challenge)
-        if subprocess.run('deno --version', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
-            # Install deno via official script (works on Linux & macOS)
-            deno_home = os.path.expanduser("~/.deno")
-            subprocess.run('curl -fsSL https://deno.land/install.sh | sh',
-                           shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
-            # Tambahkan ke PATH agar yt-dlp bisa menemukan deno
-            deno_bin = os.path.join(deno_home, "bin")
-            if os.path.isdir(deno_bin) and deno_bin not in os.environ.get("PATH", ""):
-                os.environ["PATH"] = deno_bin + os.pathsep + os.environ.get("PATH", "")
+        # HAPUS yt-dlp-ejs jika ada — plugin ini MERUSAK karena intercept n-challenge
+        # lalu gagal (butuh deno yang tidak tersedia di server), sementara
+        # built-in Python JS interpreter yt-dlp sebenarnya sudah cukup.
+        subprocess.run([sys.executable, '-m', 'pip', 'uninstall', '-y', 'yt-dlp-ejs'],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
     except Exception:
         pass
-    _ensure_yt_dlp_deps._done = True
+    try:
+        # Upgrade yt-dlp ke versi terbaru agar n-sig challenge solver up-to-date
+        subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', '--upgrade', 'yt-dlp'],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+    except Exception:
+        pass
+    _ensure_yt_dlp_ready._done = True
 
 
 def get_ytdlp_base_cmd(client="default,-android_sdkless", use_cookies=True):
-    _ensure_yt_dlp_deps()
+    _ensure_yt_dlp_ready()
     cookie_flag = ""
     if use_cookies:
         try:
