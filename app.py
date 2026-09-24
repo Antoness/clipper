@@ -223,9 +223,14 @@ def _ensure_yt_dlp_deps():
                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
         # Cek deno tersedia (dibutuhkan yt-dlp-ejs untuk solve JS challenge)
         if subprocess.run('deno --version', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
-            # Coba install via brew (macOS) atau npm
-            subprocess.run('brew install deno 2>/dev/null || npm install -g deno 2>/dev/null || true',
+            # Install deno via official script (works on Linux & macOS)
+            deno_home = os.path.expanduser("~/.deno")
+            subprocess.run('curl -fsSL https://deno.land/install.sh | sh',
                            shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+            # Tambahkan ke PATH agar yt-dlp bisa menemukan deno
+            deno_bin = os.path.join(deno_home, "bin")
+            if os.path.isdir(deno_bin) and deno_bin not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = deno_bin + os.pathsep + os.environ.get("PATH", "")
     except Exception:
         pass
     _ensure_yt_dlp_deps._done = True
