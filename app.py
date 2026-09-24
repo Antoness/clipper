@@ -209,13 +209,13 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-def get_ytdlp_base_cmd(client="android"):
+def get_ytdlp_base_cmd(client="android,ios"):
     cookie_flag = ""
     try:
         if "YOUTUBE_COOKIES" in st.secrets and st.secrets["YOUTUBE_COOKIES"]:
             import tempfile
             cookie_path = os.path.join(tempfile.gettempdir(), "yt_cookies.txt")
-            raw_cookies = st.secrets["YOUTUBE_COOKIES"].strip()
+            raw_cookies = st.secrets["YOUTUBE_COOKIES"].strip().replace('\r\n', '\n').replace('\r', '\n')
             if not raw_cookies.startswith("# Netscape HTTP Cookie File"):
                 raw_cookies = "# Netscape HTTP Cookie File\n# https://curl.se/rfc/cookie_spec.html\n# This is a generated file! Do not edit.\n\n" + raw_cookies
             with open(cookie_path, "w", encoding="utf-8") as f:
@@ -1152,15 +1152,15 @@ elif st.session_state.current_page == 4:
                         st.progress(20)
                     target_raw = os.path.join("downloads", f"raw_{out}")
                     
-                    # Retry dengan rotasi client jika terkena 403
+                    # Retry dengan rotasi client mobile & embedded (tanpa mweb PO-token)
                     success_dl = False
-                    dl_clients = ["android", "ios", "mweb"]
+                    dl_clients = ["android,ios", "ios", "android_embedded", "android"]
                     last_dl_err = ""
                     for cl in dl_clients:
                         base_cmd = get_ytdlp_base_cmd(cl)
                         cmd_ytdlp = (
                             f'{base_cmd}'
-                            f'-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/bestvideo+bestaudio/best" '
+                            f'-f "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*+ba/b[ext=mp4]/b/best" '
                             f'--merge-output-format mp4 --download-sections "*{s}-{e}" '
                             f'--force-overwrites -o "{target_raw}" "{info["url"]}"'
                         )
