@@ -1141,38 +1141,60 @@ elif st.session_state.current_page == 4:
                 
                 ctx = get_script_run_ctx()
                 
-                # ── FASE 1: UNDUH SEKUENSIAL (YouTube blokir download paralel) ──
-                log_box.info(f"📥 Step 2: Mengunduh {len(valid_clips)} klip secara berurutan...")
-                download_results = []  # [(idx, out, target_raw, config_tuple, success)]
+                # ── FASE 1: UNDUH SUMBER SEKALI & POTONG KLIP SECARA LOKAL ──
+                log_box.info(f"📥 Step 2: Menyiapkan video sumber untuk {len(valid_clips)} klip...")
+                source_video_path = os.path.join("downloads", "source_video.mp4")
                 
+                # Unduh video sumber sekali saja menggunakan engine yt-dlp native
+                source_download_ok = False
+                source_dl_err = ""
+                if os.path.exists(source_video_path) and os.path.getsize(source_video_path) > 10000:
+                    source_download_ok = True
+                else:
+                    dl_clients = ["android,ios", "ios", "android_embedded", "android"]
+                    for cl in dl_clients:
+                        base_cmd = get_ytdlp_base_cmd(cl)
+                        cmd_dl_source = (
+                            f'{base_cmd}'
+                            f'-f "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b/best" '
+                            f'--merge-output-format mp4 '
+                            f'--force-overwrites -o "{source_video_path}" "{info["url"]}"'
+                        )
+                        proc_dl = subprocess.run(cmd_dl_source, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                        if os.path.exists(source_video_path) and os.path.getsize(source_video_path) > 10000:
+                            source_download_ok = True
+                            break
+                        source_dl_err = proc_dl.stderr.decode('utf-8', errors='ignore')
+                        time.sleep(1)
+
+                download_results = []  # [(idx, out, target_raw, config_tuple, success)]
                 for idx, config_tuple in enumerate(valid_clips):
                     s, e, out, dur, cap, hk, desk, lay, sc, rsn = config_tuple
                     with clip_placeholders[idx].container():
-                        st.info(f"⏳ **Klip {idx+1} ({out})** - Mengunduh Video Mentah...")
-                        st.progress(20)
+                        st.info(f"⏳ **Klip {idx+1} ({out})** - Memotong Segmen Video...")
+                        st.progress(25)
                     target_raw = os.path.join("downloads", f"raw_{out}")
                     
-                    # Retry dengan rotasi client mobile & embedded (tanpa mweb PO-token)
-                    success_dl = False
-                    dl_clients = ["android,ios", "ios", "android_embedded", "android"]
-                    last_dl_err = ""
-                    for cl in dl_clients:
-                        base_cmd = get_ytdlp_base_cmd(cl)
-                        cmd_ytdlp = (
-                            f'{base_cmd}'
-                            f'-f "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*+ba/b[ext=mp4]/b/best" '
-                            f'--merge-output-format mp4 --download-sections "*{s}-{e}" '
-                            f'--force-overwrites -o "{target_raw}" "{info["url"]}"'
-                        )
-                        proc_dl = subprocess.run(cmd_ytdlp, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    success_cut = False
+                    cut_err = ""
+                    if source_download_ok:
+                        # Potong file lokal dengan FFmpeg (cepat & 100% offline)
+                        cmd_cut = f'ffmpeg -y -ss {s} -to {e} -i "{source_video_path}" -c copy "{target_raw}"'
+                        subprocess.run(cmd_cut, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                         if os.path.exists(target_raw) and os.path.getsize(target_raw) > 1000:
-                            success_dl = True
-                            break
-                        last_dl_err = proc_dl.stderr.decode('utf-8', errors='ignore')
-                        time.sleep(1)
+                            success_cut = True
+                        else:
+                            # Fallback re-encode jika keyframe copy gagal
+                            cmd_cut_reencode = f'ffmpeg -y -ss {s} -to {e} -i "{source_video_path}" -c:v libx264 -c:a aac -preset fast "{target_raw}"'
+                            subprocess.run(cmd_cut_reencode, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                            if os.path.exists(target_raw) and os.path.getsize(target_raw) > 1000:
+                                success_cut = True
+                            else:
+                                cut_err = "Gagal memotong segmen video dari sumber lokal."
+                    else:
+                        cut_err = source_dl_err
                     
-                    download_results.append((idx, out, target_raw, config_tuple, success_dl,
-                                             last_dl_err if not success_dl else ""))
+                    download_results.append((idx, out, target_raw, config_tuple, success_cut, cut_err if not success_cut else ""))
 
                 # ── FASE 2: RENDER FFmpeg PARALEL (CPU-bound, aman diparalelkan) ──
                 def render_clip(dl_result):
