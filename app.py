@@ -209,7 +209,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-def get_ytdlp_base_cmd(client="tv_embedded,ios,android,web"):
+def get_ytdlp_base_cmd(client="android,web"):
     cookie_flag = ""
     try:
         if "YOUTUBE_COOKIES" in st.secrets and st.secrets["YOUTUBE_COOKIES"]:
@@ -222,7 +222,7 @@ def get_ytdlp_base_cmd(client="tv_embedded,ios,android,web"):
             cookie_flag = '--cookies "cookies.txt" '
     except Exception:
         pass
-    return f'yt-dlp {cookie_flag}--js-runtimes nodejs --extractor-args "youtube:player_client={client}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" '
+    return f'yt-dlp {cookie_flag}--js-runtimes node --extractor-args "youtube:player_client={client}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" '
 
 
 def load_metadata(url):
@@ -1116,7 +1116,7 @@ elif st.session_state.current_page == 4:
                     
                     # Retry dengan rotasi client jika terkena 403
                     success_dl = False
-                    dl_clients = ["tv_embedded,web_embedded", "ios,mweb", "android,web", "web"]
+                    dl_clients = ["android,web", "ios,web", "mweb,web", "web"]
                     last_dl_err = ""
                     for cl in dl_clients:
                         base_cmd = get_ytdlp_base_cmd(cl)
