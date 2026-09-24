@@ -209,7 +209,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-def get_ytdlp_base_cmd(client="android,ios"):
+def get_ytdlp_base_cmd(client="ios"):
     cookie_flag = ""
     try:
         if "YOUTUBE_COOKIES" in st.secrets and st.secrets["YOUTUBE_COOKIES"]:
@@ -225,7 +225,7 @@ def get_ytdlp_base_cmd(client="android,ios"):
             cookie_flag = '--cookies "cookies.txt" '
     except Exception:
         pass
-    return f'yt-dlp {cookie_flag}--no-check-certificates --geo-bypass --extractor-args "youtube:player_client={client}" --user-agent "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36" '
+    return f'yt-dlp {cookie_flag}--no-check-certificates --geo-bypass --extractor-args "youtube:player_client={client}" --user-agent "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1" '
 
 
 def load_metadata(url):
@@ -1151,12 +1151,12 @@ elif st.session_state.current_page == 4:
                 if os.path.exists(source_video_path) and os.path.getsize(source_video_path) > 10000:
                     source_download_ok = True
                 else:
-                    dl_clients = ["android,ios", "ios", "android_embedded", "android"]
+                    dl_clients = ["ios", "web_creator", "tv", "android_embedded"]
                     for cl in dl_clients:
                         base_cmd = get_ytdlp_base_cmd(cl)
                         cmd_dl_source = (
                             f'{base_cmd}'
-                            f'-f "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/bv*[height<=1080]+ba/b[height<=1080]/bv*+ba/b/best" '
+                            f'-f "best[height<=1080]/bv*[height<=1080]+ba/b/best" '
                             f'--merge-output-format mp4 '
                             f'--force-overwrites -o "{source_video_path}" "{info["url"]}"'
                         )
