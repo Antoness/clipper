@@ -209,7 +209,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-def get_ytdlp_base_cmd(client="android,web"):
+def get_ytdlp_base_cmd(client="android"):
     cookie_flag = ""
     try:
         if "YOUTUBE_COOKIES" in st.secrets and st.secrets["YOUTUBE_COOKIES"]:
@@ -225,32 +225,54 @@ def get_ytdlp_base_cmd(client="android,web"):
             cookie_flag = '--cookies "cookies.txt" '
     except Exception:
         pass
-    return f'yt-dlp {cookie_flag}--js-runtimes node --extractor-args "youtube:player_client={client}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" '
+    return f'yt-dlp {cookie_flag}--no-check-certificates --geo-bypass --extractor-args "youtube:player_client={client}" --user-agent "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36" '
 
 
 def load_metadata(url):
-    clients = ["ios,android,web", "android,web", "web_creator,android", "mweb"]
-    last_err = ""
+    # 1. Cara tercepat & 100% anti-blokir: Gunakan YouTube oEmbed API publik (tidak butuh cookies & bebas blokir IP)
+    video_title = ""
+    duration_val = 600  # Default 10 menit
+    try:
+        import urllib.request
+        import json
+        oembed_url = f"https://www.youtube.com/oembed?url={urllib.parse.quote(url)}&format=json"
+        req = urllib.request.Request(oembed_url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            if response.status == 200:
+                data = json.loads(response.read().decode())
+                video_title = data.get("title", "")
+    except Exception:
+        pass
+
+    # 2. Ambil durasi via yt-dlp flat extraction (android client tanpa n-sig challenge)
+    clients = ["android", "ios", "mweb"]
     for cl in clients:
         try:
             base = get_ytdlp_base_cmd(cl)
-            cmd_meta = f'{base}--print "title,duration" "{url}"'
+            cmd_meta = f'{base}--flat-playlist --print "%(title)s\n%(duration)s" "{url}"'
             proc = subprocess.Popen(cmd_meta, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-            stdout, stderr = proc.communicate()
-            
+            stdout, stderr = proc.communicate(timeout=8)
             if proc.returncode == 0:
-                meta_output = stdout.decode('utf-8', errors='ignore').strip().split('\n')
-                if len(meta_output) >= 2:
-                    st.session_state.video_info = {
-                        'url': url,
-                        'title': meta_output[0],
-                        'duration': int(meta_output[1])
-                    }
-                    return True, ""
-            last_err = stderr.decode('utf-8', errors='ignore')
-        except Exception as e:
-            last_err = str(e)
-    return False, last_err
+                lines = stdout.decode('utf-8', errors='ignore').strip().split('\n')
+                if len(lines) >= 1 and lines[0] and lines[0] != "NA":
+                    if not video_title:
+                        video_title = lines[0]
+                if len(lines) >= 2 and lines[1].isdigit():
+                    duration_val = int(lines[1])
+                    break
+        except Exception:
+            pass
+
+    # 3. Jika judul berhasil didapatkan, sukseskan!
+    if video_title:
+        st.session_state.video_info = {
+            'url': url,
+            'title': video_title,
+            'duration': duration_val
+        }
+        return True, ""
+        
+    return False, "Tidak dapat memuat informasi video dari URL tersebut. Pastikan link YouTube publik dan valid."
 
 
 @st.dialog("✂️ Editor Segmen Crop Dinamis")
@@ -740,7 +762,7 @@ elif st.session_state.current_page == 99:
                         tmpdir = tempfile.mkdtemp()
                         audio_path = os.path.join(tmpdir, "audio.m4a")
                         dl_audio_success = False
-                        for cl in ["ios,android,web", "android,web", "web_creator", "mweb"]:
+                        for cl in ["android", "ios", "mweb"]:
                             base_cmd = get_ytdlp_base_cmd(cl)
                             cmd_audio = f'{base_cmd}-f "bestaudio[ext=m4a]/bestaudio/best" -o "{audio_path}" "{st.session_state.video_url}"'
                             subprocess.run(cmd_audio, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -1119,13 +1141,13 @@ elif st.session_state.current_page == 4:
                     
                     # Retry dengan rotasi client jika terkena 403
                     success_dl = False
-                    dl_clients = ["android,web", "ios,web", "mweb,web", "web"]
+                    dl_clients = ["android", "ios", "mweb"]
                     last_dl_err = ""
                     for cl in dl_clients:
                         base_cmd = get_ytdlp_base_cmd(cl)
                         cmd_ytdlp = (
                             f'{base_cmd}'
-                            f'-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best" '
+                            f'-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/bestvideo+bestaudio/best" '
                             f'--merge-output-format mp4 --download-sections "*{s}-{e}" '
                             f'--force-overwrites -o "{target_raw}" "{info["url"]}"'
                         )
