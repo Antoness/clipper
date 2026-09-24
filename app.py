@@ -212,18 +212,10 @@ st.markdown("""
 
 
 def _ensure_yt_dlp_ready():
-    """Pastikan yt-dlp siap: upgrade ke terbaru & hapus plugin yt-dlp-ejs yang merusak."""
+    """Pastikan yt-dlp siap: upgrade ke versi terbaru untuk n-sig challenge terbaru."""
     if getattr(_ensure_yt_dlp_ready, '_done', False):
         return
     import sys
-    try:
-        # HAPUS yt-dlp-ejs jika ada — plugin ini MERUSAK karena intercept n-challenge
-        # lalu gagal (butuh deno yang tidak tersedia di server), sementara
-        # built-in Python JS interpreter yt-dlp sebenarnya sudah cukup.
-        subprocess.run([sys.executable, '-m', 'pip', 'uninstall', '-y', 'yt-dlp-ejs'],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
-    except Exception:
-        pass
     try:
         # Upgrade yt-dlp ke versi terbaru agar n-sig challenge solver up-to-date
         subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', '--upgrade', 'yt-dlp'],
@@ -233,7 +225,7 @@ def _ensure_yt_dlp_ready():
     _ensure_yt_dlp_ready._done = True
 
 
-def get_ytdlp_base_cmd(client="default,-android_sdkless", use_cookies=True):
+def get_ytdlp_base_cmd(client="default", use_cookies=True):
     _ensure_yt_dlp_ready()
     cookie_flag = ""
     if use_cookies:
@@ -251,7 +243,8 @@ def get_ytdlp_base_cmd(client="default,-android_sdkless", use_cookies=True):
                 cookie_flag = '--cookies "cookies.txt" '
         except Exception:
             pass
-    return f'yt-dlp {cookie_flag}--no-check-certificates --geo-bypass --extractor-args "youtube:player_client={client}" '
+    # --impersonate chrome: Kritis! Fake TLS fingerprint agar YouTube tidak blokir sebagai bot
+    return f'yt-dlp {cookie_flag}--impersonate chrome --no-check-certificates --geo-bypass --extractor-args "youtube:player_client={client}" '
 
 
 def load_metadata(url):
@@ -270,11 +263,11 @@ def load_metadata(url):
     except Exception:
         pass
 
-    # 2. Ambil durasi via yt-dlp flat extraction (default client dengan SABR bypass)
-    clients = ["default,-android_sdkless", "web", "mweb", "tv_embedded"]
+    # 2. Ambil durasi via yt-dlp flat extraction (dengan impersonate chrome + cookies)
+    clients = ["default", "web_creator", "web", "mweb"]
     for cl in clients:
         try:
-            base = get_ytdlp_base_cmd(cl, use_cookies=False)
+            base = get_ytdlp_base_cmd(cl, use_cookies=True)
             cmd_meta = f'{base}--flat-playlist --print "%(title)s\n%(duration)s" "{url}"'
             proc = subprocess.Popen(cmd_meta, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = proc.communicate(timeout=8)
@@ -1177,29 +1170,29 @@ elif st.session_state.current_page == 4:
                 if os.path.exists(source_video_path) and os.path.getsize(source_video_path) > 10000:
                     source_download_ok = True
                 else:
-                    # Strategi download multi-tier untuk bypass SABR-only streaming experiment
-                    # Format selector bertingkat: coba yang terbaik dulu, fallback ke yang lebih sederhana
+                    # Strategi download untuk Streamlit Cloud:
+                    # - SELALU pakai cookies (IP cloud diblokir YouTube tanpa auth)
+                    # - --impersonate chrome sudah ada di base_cmd (bypass TLS fingerprint)
+                    # - Format sederhana dulu, baru spesifik
                     format_selectors = [
-                        'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]',
-                        'bv*[height<=1080]+ba/b',
+                        'bv*+ba/b',
                         'best',
-                        'bv+ba/b',
+                        'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
                     ]
-                    # Client strategies: default dulu (paling reliable vs SABR), lalu fallback
-                    attempts = [
-                        ("default,-android_sdkless", True),    # Best: default client + cookies
-                        ("default,-android_sdkless", False),   # Default tanpa cookies
-                        ("web", True),                         # Web client + cookies
-                        ("mweb", True),                        # Mobile web
-                        ("tv_embedded,web_embedded", True),    # Embedded fallback
-                        ("tv_embedded,web_embedded", False),   # Embedded tanpa cookies
+                    # Semua pakai cookies=True — wajib di cloud server
+                    client_strategies = [
+                        "default",
+                        "web_creator",
+                        "web",
+                        "mweb",
+                        "tv_embedded,web_embedded",
                     ]
                     dl_success = False
-                    for cl, use_ck in attempts:
+                    for cl in client_strategies:
                         if dl_success:
                             break
                         for fmt in format_selectors:
-                            base_cmd = get_ytdlp_base_cmd(client=cl, use_cookies=use_ck)
+                            base_cmd = get_ytdlp_base_cmd(client=cl, use_cookies=True)
                             cmd_dl_source = (
                                 f'{base_cmd}'
                                 f'-f "{fmt}" '
@@ -1212,8 +1205,8 @@ elif st.session_state.current_page == 4:
                                 dl_success = True
                                 break
                             stderr_out = proc_dl.stderr.decode('utf-8', errors='ignore')
-                            # Jika error bukan soal format (misal: sign in required), langsung skip ke client berikutnya
-                            if 'sign in' in stderr_out.lower() or 'login' in stderr_out.lower():
+                            # Jika error auth (bukan format), skip ke client berikutnya
+                            if 'sign in' in stderr_out.lower() or 'not a bot' in stderr_out.lower():
                                 source_dl_err = stderr_out
                                 break
                             source_dl_err = stderr_out
