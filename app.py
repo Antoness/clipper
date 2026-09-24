@@ -729,48 +729,54 @@ elif st.session_state.current_page == 99:
                     try:
                         video_url = st.session_state.video_url
                         video_id = video_url.split("v=")[1].split("&")[0] if "v=" in video_url else video_url.split("/")[-1].split("?")[0]
-                        api = YouTubeTranscriptApi()
-                        transcript_list = api.list(video_id)
                         
+                        # Ambil transkrip resmi YouTube
+                        fetched_transcript = None
                         try:
-                            transcript_data = transcript_list.find_transcript(['id', 'en'])
-                        except:
-                            transcript_data = None
-                            for t in transcript_list:
-                                transcript_data = t
-                                break
+                            transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+                            try:
+                                transcript_data = transcript_list.find_transcript(['id', 'en'])
+                            except Exception:
+                                transcript_data = next(iter(transcript_list))
                                 
-                        if transcript_data:
                             if transcript_data.language_code != 'id' and transcript_data.is_translatable:
                                 transcript_data = transcript_data.translate('id')
-                                
                             fetched_transcript = transcript_data.fetch()
+                        except Exception:
+                            try:
+                                fetched_transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['id', 'en'])
+                            except Exception:
+                                fetched_transcript = None
+                                
+                        if fetched_transcript:
                             text_lines = []
                             for t in fetched_transcript:
-                                start = int(t.start)
+                                start = int(t['start'])
                                 hh, mm, ss = start // 3600, (start % 3600) // 60, start % 60
                                 time_str = f"{hh:02d}:{mm:02d}:{ss:02d}"
-                                text_lines.append(f"[{time_str}] {t.text}")
+                                text_lines.append(f"[{time_str}] {t['text']}")
                             
                             content_payload = "\n".join(text_lines)[:35000]
                             content_type = "text"
                         else:
                             raise Exception("No transcript available")
                     except Exception as e:
-                        st.info("⚠️ Subtitle tidak ditemukan. Mengunduh Audio (membutuhkan waktu tambahan)...")
+                        st.info("⚠️ Subtitle tidak ditemukan. Mengunduh Audio untuk analisis AI...")
                         import tempfile
                         tmpdir = tempfile.mkdtemp()
                         audio_path = os.path.join(tmpdir, "audio.m4a")
                         dl_audio_success = False
                         for cl in ["android", "ios", "mweb"]:
                             base_cmd = get_ytdlp_base_cmd(cl)
-                            cmd_audio = f'{base_cmd}-f "bestaudio[ext=m4a]/bestaudio/best" -o "{audio_path}" "{st.session_state.video_url}"'
+                            cmd_audio = f'{base_cmd}-x --audio-format m4a --force-overwrites -o "{audio_path}" "{st.session_state.video_url}"'
                             subprocess.run(cmd_audio, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                            if os.path.exists(audio_path) and os.path.getsize(audio_path) > 1000:
+                            files = [os.path.join(tmpdir, f) for f in os.listdir(tmpdir) if os.path.getsize(os.path.join(tmpdir, f)) > 1000]
+                            if files:
+                                audio_path = files[0]
                                 dl_audio_success = True
                                 break
                         if not dl_audio_success:
-                            st.error("Gagal mengunduh audio YouTube (403 Forbidden atau dibatasi). Coba tambahkan YOUTUBE_COOKIES di secrets.")
+                            st.error("Gagal mengunduh audio YouTube untuk analisis AI. Pastikan link YouTube publik.")
                             st.stop()
                         content_payload = audio_path
                         content_type = "audio"
