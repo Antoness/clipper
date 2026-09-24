@@ -1,5 +1,6 @@
 streamlit
-yt-dlp>=2025.1.1
+yt-dlp[default]>=2025.1.1
+yt-dlp-ejs>=0.8.0
 curl-cffi
 pycryptodome
 requests

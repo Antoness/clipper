@@ -212,23 +212,36 @@ st.markdown("""
 
 
 def _ensure_yt_dlp_ready():
-    """Pastikan yt-dlp siap: install JS runtime (deno) + upgrade yt-dlp."""
+    """Pastikan yt-dlp siap: install JS runtime (deno/node) + challenge solver script (yt-dlp-ejs)."""
     if getattr(_ensure_yt_dlp_ready, '_done', False):
         return
     import sys
 
-    # 1. Upgrade yt-dlp ke versi terbaru agar n-sig solver up-to-date
+    # 1. Pastikan package yt-dlp-ejs & yt-dlp[default] terinstall
     try:
-        subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', '--upgrade', 'yt-dlp'],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
-    except Exception:
-        pass
+        import yt_dlp_ejs  # noqa: F401
+    except ImportError:
+        try:
+            subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', '--upgrade', 'yt-dlp[default]', 'yt-dlp-ejs'],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+        except Exception:
+            pass
 
-    # 2. Install DENO binary langsung (tanpa apt/brew/npm)
-    #    Ini KRITIS: tanpa JS runtime, yt-dlp tidak bisa solve n-sig challenge YouTube
+    # 2. Pastikan binary Deno terpasang (paling reliable untuk n-sig challenge solving)
     try:
+        deno_dir = os.path.expanduser("~/.deno")
+        deno_bin_dir = os.path.join(deno_dir, "bin")
+        deno_bin = os.path.join(deno_bin_dir, "deno")
+
+        # Cek apakah deno sudah di PATH atau sudah ada di ~/.deno/bin/deno
         deno_check = subprocess.run('deno --version', shell=True,
-                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if deno_check.returncode != 0 and os.path.exists(deno_bin):
+            if deno_bin_dir not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = deno_bin_dir + os.pathsep + os.environ.get("PATH", "")
+            deno_check = subprocess.run('deno --version', shell=True,
+                                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
         if deno_check.returncode != 0:
             import platform
             arch = platform.machine().lower()
@@ -242,23 +255,18 @@ def _ensure_yt_dlp_ready():
                 deno_arch = 'x86_64-unknown-linux-gnu'
 
             deno_url = f"https://github.com/denoland/deno/releases/latest/download/deno-{deno_arch}.zip"
-            deno_dir = os.path.expanduser("~/.deno")
-            deno_bin_dir = os.path.join(deno_dir, "bin")
             os.makedirs(deno_bin_dir, exist_ok=True)
             zip_path = os.path.join(deno_dir, "deno.zip")
 
-            # Download via curl (paling reliable di semua environment)
             dl_result = subprocess.run(
                 f'curl -fsSL -o "{zip_path}" "{deno_url}"',
-                shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120
+                shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120
             )
             if dl_result.returncode == 0 and os.path.exists(zip_path) and os.path.getsize(zip_path) > 1000000:
-                # Extract binary
                 subprocess.run(
                     f'unzip -o -q "{zip_path}" -d "{deno_bin_dir}"',
                     shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
                 )
-                deno_bin = os.path.join(deno_bin_dir, "deno")
                 if os.path.exists(deno_bin):
                     import stat
                     os.chmod(deno_bin, os.stat(deno_bin).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
@@ -304,6 +312,16 @@ def _get_impersonate_flag():
         return ''
 
 
+def _get_js_runtime_flags():
+    """Return runtime flags untuk EJS challenge solver yt-dlp."""
+    flags = ['--remote-components ejs:github']
+    deno_custom = os.path.expanduser('~/.deno/bin/deno')
+    if os.path.exists(deno_custom):
+        flags.append(f'--js-runtimes "deno:{deno_custom}"')
+    flags.append('--js-runtimes node')
+    return ' '.join(flags) + ' '
+
+
 def get_ytdlp_base_cmd(client="default", use_cookies=True):
     _ensure_yt_dlp_ready()
     cookie_flag = ""
@@ -323,7 +341,8 @@ def get_ytdlp_base_cmd(client="default", use_cookies=True):
         except Exception:
             pass
     impersonate = _get_impersonate_flag()
-    return f'yt-dlp {cookie_flag}{impersonate}--no-check-certificates --geo-bypass --extractor-args "youtube:player_client={client}" '
+    js_flags = _get_js_runtime_flags()
+    return f'yt-dlp {cookie_flag}{impersonate}{js_flags}--no-check-certificates --geo-bypass --extractor-args "youtube:player_client={client}" '
 
 
 def load_metadata(url):
@@ -588,7 +607,7 @@ if st.session_state.current_page == 1:
                         
                         st.info("Sedang mengambil 100+ video dari YouTube, ini mungkin memakan waktu 10-20 detik...")
                         for cat_name, (query, num) in categories.items():
-                            base_cmd = get_ytdlp_base_cmd("ios,web")
+                            base_cmd = get_ytdlp_base_cmd("default")
                             cmd_search = f'{base_cmd}"ytsearch{num}:{query}" --flat-playlist --print "%(title)s|https://youtube.com/watch?v=%(id)s"'
                             proc = subprocess.Popen(cmd_search, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                             stdout, _ = proc.communicate()
@@ -865,7 +884,7 @@ elif st.session_state.current_page == 99:
                         tmpdir = tempfile.mkdtemp()
                         audio_path = os.path.join(tmpdir, "audio.mp3")
                         dl_audio_success = False
-                        for cl in ["android", "ios", "mweb"]:
+                        for cl in ["default", "mweb", "android"]:
                             base_cmd = get_ytdlp_base_cmd(cl)
                             cmd_audio = f'{base_cmd}-f "ba/b" -x --audio-format mp3 --force-overwrites -o "{tmpdir}/audio.%(ext)s" "{st.session_state.video_url}"'
                             subprocess.run(cmd_audio, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -1255,16 +1274,17 @@ elif st.session_state.current_page == 4:
                     # - Format sederhana dulu, baru spesifik
                     format_selectors = [
                         'bv*+ba/b',
-                        'best',
                         'bestvideo[height<=1080]+bestaudio/best[height<=1080]',
+                        '18/b/best',
+                        'best',
                     ]
-                    # Semua pakai cookies=True — wajib di cloud server
                     client_strategies = [
                         "default",
-                        "web_creator",
-                        "web",
                         "mweb",
-                        "tv_embedded,web_embedded",
+                        "tv_embedded",
+                        "web_embedded",
+                        "android",
+                        "web_creator",
                     ]
                     dl_success = False
                     for cl in client_strategies:
