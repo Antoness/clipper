@@ -209,7 +209,30 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-def get_ytdlp_base_cmd(client="tv_embedded,web_embedded,android_creator,ios", use_cookies=True):
+def _ensure_yt_dlp_deps():
+    """Auto-install deno dan yt-dlp-ejs untuk memecahkan YouTube n-challenge (SABR experiment)."""
+    if getattr(_ensure_yt_dlp_deps, '_done', False):
+        return
+    try:
+        # Install yt-dlp-ejs plugin jika belum ada
+        import importlib
+        try:
+            importlib.import_module('yt_dlp_plugins.extractor.ejs')
+        except (ImportError, ModuleNotFoundError):
+            subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', 'yt-dlp-ejs'],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
+        # Cek deno tersedia (dibutuhkan yt-dlp-ejs untuk solve JS challenge)
+        if subprocess.run('deno --version', shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
+            # Coba install via brew (macOS) atau npm
+            subprocess.run('brew install deno 2>/dev/null || npm install -g deno 2>/dev/null || true',
+                           shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+    except Exception:
+        pass
+    _ensure_yt_dlp_deps._done = True
+
+
+def get_ytdlp_base_cmd(client="default,-android_sdkless", use_cookies=True):
+    _ensure_yt_dlp_deps()
     cookie_flag = ""
     if use_cookies:
         try:
@@ -245,8 +268,8 @@ def load_metadata(url):
     except Exception:
         pass
 
-    # 2. Ambil durasi via yt-dlp flat extraction (anonymous iOS client tanpa n-sig challenge)
-    clients = ["ios", "web_creator", "tv", "android_embedded"]
+    # 2. Ambil durasi via yt-dlp flat extraction (default client dengan SABR bypass)
+    clients = ["default,-android_sdkless", "web", "mweb", "tv_embedded"]
     for cl in clients:
         try:
             base = get_ytdlp_base_cmd(cl, use_cookies=False)
@@ -1152,28 +1175,47 @@ elif st.session_state.current_page == 4:
                 if os.path.exists(source_video_path) and os.path.getsize(source_video_path) > 10000:
                     source_download_ok = True
                 else:
-                    # Coba Anonymous (tanpa cookies) dulu agar tidak terblokir jika session cookies expired/rotated di browser
-                    attempts = [
-                        ("tv_embedded,web_embedded,android_creator,ios", False),  # Bypass login & age-gate via embedded streams
-                        ("web_creator,tv_embedded", False),
-                        ("ios,mweb", False),
-                        ("tv_embedded,web_embedded", True),
-                        ("ios,web", True)
+                    # Strategi download multi-tier untuk bypass SABR-only streaming experiment
+                    # Format selector bertingkat: coba yang terbaik dulu, fallback ke yang lebih sederhana
+                    format_selectors = [
+                        'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]',
+                        'bv*[height<=1080]+ba/b',
+                        'best',
+                        'bv+ba/b',
                     ]
+                    # Client strategies: default dulu (paling reliable vs SABR), lalu fallback
+                    attempts = [
+                        ("default,-android_sdkless", True),    # Best: default client + cookies
+                        ("default,-android_sdkless", False),   # Default tanpa cookies
+                        ("web", True),                         # Web client + cookies
+                        ("mweb", True),                        # Mobile web
+                        ("tv_embedded,web_embedded", True),    # Embedded fallback
+                        ("tv_embedded,web_embedded", False),   # Embedded tanpa cookies
+                    ]
+                    dl_success = False
                     for cl, use_ck in attempts:
-                        base_cmd = get_ytdlp_base_cmd(client=cl, use_cookies=use_ck)
-                        cmd_dl_source = (
-                            f'{base_cmd}'
-                            f'-f "best[height<=1080]/bv*[height<=1080]+ba/b/best" '
-                            f'--merge-output-format mp4 '
-                            f'--force-overwrites -o "{source_video_path}" "{info["url"]}"'
-                        )
-                        proc_dl = subprocess.run(cmd_dl_source, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                        if os.path.exists(source_video_path) and os.path.getsize(source_video_path) > 10000:
-                            source_download_ok = True
+                        if dl_success:
                             break
-                        source_dl_err = proc_dl.stderr.decode('utf-8', errors='ignore')
-                        time.sleep(1)
+                        for fmt in format_selectors:
+                            base_cmd = get_ytdlp_base_cmd(client=cl, use_cookies=use_ck)
+                            cmd_dl_source = (
+                                f'{base_cmd}'
+                                f'-f "{fmt}" '
+                                f'--merge-output-format mp4 '
+                                f'--force-overwrites -o "{source_video_path}" "{info["url"]}"'
+                            )
+                            proc_dl = subprocess.run(cmd_dl_source, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                            if os.path.exists(source_video_path) and os.path.getsize(source_video_path) > 10000:
+                                source_download_ok = True
+                                dl_success = True
+                                break
+                            stderr_out = proc_dl.stderr.decode('utf-8', errors='ignore')
+                            # Jika error bukan soal format (misal: sign in required), langsung skip ke client berikutnya
+                            if 'sign in' in stderr_out.lower() or 'login' in stderr_out.lower():
+                                source_dl_err = stderr_out
+                                break
+                            source_dl_err = stderr_out
+                        time.sleep(0.5)
 
                 download_results = []  # [(idx, out, target_raw, config_tuple, success)]
                 for idx, config_tuple in enumerate(valid_clips):
