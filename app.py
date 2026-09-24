@@ -209,22 +209,23 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-def get_ytdlp_base_cmd(client="ios"):
+def get_ytdlp_base_cmd(client="ios", use_cookies=True):
     cookie_flag = ""
-    try:
-        if "YOUTUBE_COOKIES" in st.secrets and st.secrets["YOUTUBE_COOKIES"]:
-            import tempfile
-            cookie_path = os.path.join(tempfile.gettempdir(), "yt_cookies.txt")
-            raw_cookies = st.secrets["YOUTUBE_COOKIES"].strip().replace('\r\n', '\n').replace('\r', '\n')
-            if not raw_cookies.startswith("# Netscape HTTP Cookie File"):
-                raw_cookies = "# Netscape HTTP Cookie File\n# https://curl.se/rfc/cookie_spec.html\n# This is a generated file! Do not edit.\n\n" + raw_cookies
-            with open(cookie_path, "w", encoding="utf-8") as f:
-                f.write(raw_cookies)
-            cookie_flag = f'--cookies "{cookie_path}" '
-        elif os.path.exists("cookies.txt"):
-            cookie_flag = '--cookies "cookies.txt" '
-    except Exception:
-        pass
+    if use_cookies:
+        try:
+            if "YOUTUBE_COOKIES" in st.secrets and st.secrets["YOUTUBE_COOKIES"]:
+                import tempfile
+                cookie_path = os.path.join(tempfile.gettempdir(), "yt_cookies.txt")
+                raw_cookies = st.secrets["YOUTUBE_COOKIES"].strip().replace('\r\n', '\n').replace('\r', '\n')
+                if not raw_cookies.startswith("# Netscape HTTP Cookie File"):
+                    raw_cookies = "# Netscape HTTP Cookie File\n# https://curl.se/rfc/cookie_spec.html\n# This is a generated file! Do not edit.\n\n" + raw_cookies
+                with open(cookie_path, "w", encoding="utf-8") as f:
+                    f.write(raw_cookies)
+                cookie_flag = f'--cookies "{cookie_path}" '
+            elif os.path.exists("cookies.txt"):
+                cookie_flag = '--cookies "cookies.txt" '
+        except Exception:
+            pass
     return f'yt-dlp {cookie_flag}--no-check-certificates --geo-bypass --extractor-args "youtube:player_client={client}" --user-agent "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1" '
 
 
@@ -244,11 +245,11 @@ def load_metadata(url):
     except Exception:
         pass
 
-    # 2. Ambil durasi via yt-dlp flat extraction (android client tanpa n-sig challenge)
-    clients = ["android", "ios", "mweb"]
+    # 2. Ambil durasi via yt-dlp flat extraction (anonymous iOS client tanpa n-sig challenge)
+    clients = ["ios", "web_creator", "tv", "android_embedded"]
     for cl in clients:
         try:
-            base = get_ytdlp_base_cmd(cl)
+            base = get_ytdlp_base_cmd(cl, use_cookies=False)
             cmd_meta = f'{base}--flat-playlist --print "%(title)s\n%(duration)s" "{url}"'
             proc = subprocess.Popen(cmd_meta, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             stdout, stderr = proc.communicate(timeout=8)
@@ -1151,9 +1152,17 @@ elif st.session_state.current_page == 4:
                 if os.path.exists(source_video_path) and os.path.getsize(source_video_path) > 10000:
                     source_download_ok = True
                 else:
-                    dl_clients = ["ios", "web_creator", "tv", "android_embedded"]
-                    for cl in dl_clients:
-                        base_cmd = get_ytdlp_base_cmd(cl)
+                    # Coba Anonymous (tanpa cookies) dulu agar tidak terblokir jika session cookies expired/rotated di browser
+                    attempts = [
+                        ("ios", False),           # Anonymous iOS client (paling tahan, bebas SABR & bebas cookie basi)
+                        ("web_creator", False),   # Anonymous web_creator
+                        ("tv", False),            # Anonymous TV
+                        ("android_embedded", False),
+                        ("ios", True),            # Coba dengan cookie jika ada
+                        ("web_creator", True)
+                    ]
+                    for cl, use_ck in attempts:
+                        base_cmd = get_ytdlp_base_cmd(client=cl, use_cookies=use_ck)
                         cmd_dl_source = (
                             f'{base_cmd}'
                             f'-f "best[height<=1080]/bv*[height<=1080]+ba/b/best" '
