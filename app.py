@@ -215,8 +215,11 @@ def get_ytdlp_base_cmd(client="android,web"):
         if "YOUTUBE_COOKIES" in st.secrets and st.secrets["YOUTUBE_COOKIES"]:
             import tempfile
             cookie_path = os.path.join(tempfile.gettempdir(), "yt_cookies.txt")
+            raw_cookies = st.secrets["YOUTUBE_COOKIES"].strip()
+            if not raw_cookies.startswith("# Netscape HTTP Cookie File"):
+                raw_cookies = "# Netscape HTTP Cookie File\n# https://curl.se/rfc/cookie_spec.html\n# This is a generated file! Do not edit.\n\n" + raw_cookies
             with open(cookie_path, "w", encoding="utf-8") as f:
-                f.write(st.secrets["YOUTUBE_COOKIES"].strip())
+                f.write(raw_cookies)
             cookie_flag = f'--cookies "{cookie_path}" '
         elif os.path.exists("cookies.txt"):
             cookie_flag = '--cookies "cookies.txt" '
