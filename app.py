@@ -212,17 +212,96 @@ st.markdown("""
 
 
 def _ensure_yt_dlp_ready():
-    """Pastikan yt-dlp siap: upgrade ke versi terbaru untuk n-sig challenge terbaru."""
+    """Pastikan yt-dlp siap: install JS runtime (deno) + upgrade yt-dlp."""
     if getattr(_ensure_yt_dlp_ready, '_done', False):
         return
     import sys
+
+    # 1. Upgrade yt-dlp ke versi terbaru agar n-sig solver up-to-date
     try:
-        # Upgrade yt-dlp ke versi terbaru agar n-sig challenge solver up-to-date
         subprocess.run([sys.executable, '-m', 'pip', 'install', '-q', '--upgrade', 'yt-dlp'],
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
     except Exception:
         pass
+
+    # 2. Install DENO binary langsung (tanpa apt/brew/npm)
+    #    Ini KRITIS: tanpa JS runtime, yt-dlp tidak bisa solve n-sig challenge YouTube
+    try:
+        deno_check = subprocess.run('deno --version', shell=True,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if deno_check.returncode != 0:
+            import platform
+            arch = platform.machine().lower()
+            system = platform.system().lower()
+
+            if 'darwin' in system:
+                deno_arch = 'aarch64-apple-darwin' if arch in ('arm64', 'aarch64') else 'x86_64-apple-darwin'
+            elif arch in ('aarch64', 'arm64'):
+                deno_arch = 'aarch64-unknown-linux-gnu'
+            else:
+                deno_arch = 'x86_64-unknown-linux-gnu'
+
+            deno_url = f"https://github.com/denoland/deno/releases/latest/download/deno-{deno_arch}.zip"
+            deno_dir = os.path.expanduser("~/.deno")
+            deno_bin_dir = os.path.join(deno_dir, "bin")
+            os.makedirs(deno_bin_dir, exist_ok=True)
+            zip_path = os.path.join(deno_dir, "deno.zip")
+
+            # Download via curl (paling reliable di semua environment)
+            dl_result = subprocess.run(
+                f'curl -fsSL -o "{zip_path}" "{deno_url}"',
+                shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120
+            )
+            if dl_result.returncode == 0 and os.path.exists(zip_path) and os.path.getsize(zip_path) > 1000000:
+                # Extract binary
+                subprocess.run(
+                    f'unzip -o -q "{zip_path}" -d "{deno_bin_dir}"',
+                    shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+                deno_bin = os.path.join(deno_bin_dir, "deno")
+                if os.path.exists(deno_bin):
+                    import stat
+                    os.chmod(deno_bin, os.stat(deno_bin).st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
+
+                try:
+                    os.remove(zip_path)
+                except Exception:
+                    pass
+
+            if deno_bin_dir not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = deno_bin_dir + os.pathsep + os.environ.get("PATH", "")
+    except Exception:
+        pass
+
+    # 3. Pastikan 'node' binary tersedia (fallback jika deno gagal)
+    try:
+        node_check = subprocess.run('node --version', shell=True,
+                                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if node_check.returncode != 0:
+            nodejs_check = subprocess.run('which nodejs', shell=True,
+                                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if nodejs_check.returncode == 0:
+                nodejs_path = nodejs_check.stdout.decode().strip()
+                local_bin = os.path.expanduser('~/.local/bin')
+                os.makedirs(local_bin, exist_ok=True)
+                node_link = os.path.join(local_bin, 'node')
+                if not os.path.exists(node_link):
+                    os.symlink(nodejs_path, node_link)
+                if local_bin not in os.environ.get('PATH', ''):
+                    os.environ['PATH'] = local_bin + os.pathsep + os.environ.get('PATH', '')
+    except Exception:
+        pass
+
     _ensure_yt_dlp_ready._done = True
+
+
+def _get_impersonate_flag():
+    """Return --impersonate chrome hanya jika curl_cffi tersedia."""
+    try:
+        import curl_cffi  # noqa: F401
+        return '--impersonate chrome '
+    except ImportError:
+        return ''
 
 
 def get_ytdlp_base_cmd(client="default", use_cookies=True):
@@ -243,8 +322,8 @@ def get_ytdlp_base_cmd(client="default", use_cookies=True):
                 cookie_flag = '--cookies "cookies.txt" '
         except Exception:
             pass
-    # --impersonate chrome: Kritis! Fake TLS fingerprint agar YouTube tidak blokir sebagai bot
-    return f'yt-dlp {cookie_flag}--impersonate chrome --no-check-certificates --geo-bypass --extractor-args "youtube:player_client={client}" '
+    impersonate = _get_impersonate_flag()
+    return f'yt-dlp {cookie_flag}{impersonate}--no-check-certificates --geo-bypass --extractor-args "youtube:player_client={client}" '
 
 
 def load_metadata(url):
