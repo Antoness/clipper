@@ -209,7 +209,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-def get_ytdlp_base_cmd(client="ios", use_cookies=True):
+def get_ytdlp_base_cmd(client="tv_embedded,web_embedded,android_creator,ios", use_cookies=True):
     cookie_flag = ""
     if use_cookies:
         try:
@@ -226,7 +226,7 @@ def get_ytdlp_base_cmd(client="ios", use_cookies=True):
                 cookie_flag = '--cookies "cookies.txt" '
         except Exception:
             pass
-    return f'yt-dlp {cookie_flag}--no-check-certificates --geo-bypass --extractor-args "youtube:player_client={client}" --user-agent "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1" '
+    return f'yt-dlp {cookie_flag}--no-check-certificates --geo-bypass --extractor-args "youtube:player_client={client}" '
 
 
 def load_metadata(url):
@@ -1154,12 +1154,11 @@ elif st.session_state.current_page == 4:
                 else:
                     # Coba Anonymous (tanpa cookies) dulu agar tidak terblokir jika session cookies expired/rotated di browser
                     attempts = [
-                        ("ios", False),           # Anonymous iOS client (paling tahan, bebas SABR & bebas cookie basi)
-                        ("web_creator", False),   # Anonymous web_creator
-                        ("tv", False),            # Anonymous TV
-                        ("android_embedded", False),
-                        ("ios", True),            # Coba dengan cookie jika ada
-                        ("web_creator", True)
+                        ("tv_embedded,web_embedded,android_creator,ios", False),  # Bypass login & age-gate via embedded streams
+                        ("web_creator,tv_embedded", False),
+                        ("ios,mweb", False),
+                        ("tv_embedded,web_embedded", True),
+                        ("ios,web", True)
                     ]
                     for cl, use_ck in attempts:
                         base_cmd = get_ytdlp_base_cmd(client=cl, use_cookies=use_ck)
