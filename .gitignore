@@ -35,3 +35,7 @@ url.txt
 dump.json
 downloads/*
 !downloads/.gitkeep
+
+# Folder kerja (tidak disinkronkan iCloud)
+downloads.nosync/
+static
