@@ -1,11 +1,16 @@
-streamlit
+streamlit>=1.40
 yt-dlp[default]>=2025.1.1
 yt-dlp-ejs>=0.8.0
 curl-cffi
 pycryptodome
 requests
+certifi
 youtube-transcript-api
+google-genai
 google-generativeai
 ultralytics
 opencv-python-headless
 mediapipe
+numpy
+faster-whisper
+imageio-ffmpeg

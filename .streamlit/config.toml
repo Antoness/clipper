@@ -5,3 +5,11 @@ backgroundColor="#f8f9fa"
 secondaryBackgroundColor="#ffffff"
 textColor="#1e293b"
 font="sans serif"
+
+[server]
+enableStaticServing = true
+fileWatcherType = "none"
+headless = true
+
+[browser]
+gatherUsageStats = false
